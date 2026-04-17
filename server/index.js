@@ -44,9 +44,10 @@ app.get('/api/youtube/search', async (req, res) => {
 const server = createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*", // Allow all origins for dev
+    origin: "*", 
     methods: ["GET", "POST"]
-  }
+  },
+  transports: ["websocket"]
 });
 
 // Store room states

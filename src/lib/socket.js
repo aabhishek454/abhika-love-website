@@ -1,7 +1,7 @@
 import { io } from 'socket.io-client';
 
-// In production, this would be your deployed server URL
-const URL = import.meta.env.PROD ? 'YOUR_RENDER_URL_HERE' : 'http://localhost:3001';
+// In production, this would be your deployed server URL (e.g. Render/Heroku)
+const URL = import.meta.env.PROD ? '' : 'http://localhost:3001';
 
 export const socket = io(URL, {
   autoConnect: false, // We'll connect manually when joining a room

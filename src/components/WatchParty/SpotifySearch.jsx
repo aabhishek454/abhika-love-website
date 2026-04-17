@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Search, History, Music, X, Play, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const API_URL = import.meta.env.PROD ? 'YOUR_RENDER_URL_HERE' : 'http://localhost:3001';
+const API_URL = import.meta.env.PROD ? '' : 'http://localhost:3001';
 
 export default function SpotifySearch({ onSelect }) {
   const [query, setQuery] = useState('');

@@ -55,49 +55,53 @@ export default function ListenTogether({ onClose, identity }) {
       setIsPlaying(state.isPlaying);
     };
 
-    const handleSyncAction = ({ action, payload, lockDuration }) => {
-      if (!playerRef.current) return;
-      
-      ignoreNextEvent.current = true;
-      setIsLocked(true);
-      
-      if (lockTimeoutRef.current) clearTimeout(lockTimeoutRef.current);
-      lockTimeoutRef.current = setTimeout(() => {
-        setIsLocked(false);
-        ignoreNextEvent.current = false;
-      }, lockDuration || 2500);
-
-      try {
-        if (action === 'play') {
-          playerRef.current.internalPlayer.playVideo();
-          setIsPlaying(true);
-          setActivePlayerName(payload.username);
-        } else if (action === 'pause') {
-          playerRef.current.internalPlayer.pauseVideo();
-          setIsPlaying(false);
-          setActivePlayerName('');
-        } else if (action === 'seek') {
-          playerRef.current.internalPlayer.seekTo(payload.currentTime, true);
-        } else if (action === 'changeVideo') {
-          setCurrentSong({
-             id: payload.videoId,
-             title: payload.title || 'Unknown Track',
-             channel: payload.username || 'Shared Music',
-             thumbnail: `https://img.youtube.com/vi/${payload.videoId}/0.jpg`
-          });
-          showToast(`${payload.username} changed the song 🎶`);
-        }
-      } catch (err) {
-        console.error("Sync error", err);
-      }
-    };
+    // Removed handleSyncAction in favor of direct event handling locally
 
     socket.on('room-state', handleRoomState);
-    socket.on('sync-action', handleSyncAction);
+    
+    socket.on('play', ({ currentTime, username }) => {
+      if (!playerRef.current) return;
+      ignoreNextEvent.current = true;
+      applyLocalLock();
+      playerRef.current.internalPlayer.playVideo();
+      setIsPlaying(true);
+      setActivePlayerName(username);
+    });
+
+    socket.on('pause', ({ currentTime, username }) => {
+      if (!playerRef.current) return;
+      ignoreNextEvent.current = true;
+      applyLocalLock();
+      playerRef.current.internalPlayer.pauseVideo();
+      setIsPlaying(false);
+      setActivePlayerName('');
+    });
+
+    socket.on('seek', ({ currentTime }) => {
+      if (!playerRef.current) return;
+      ignoreNextEvent.current = true;
+      applyLocalLock();
+      playerRef.current.internalPlayer.seekTo(currentTime, true);
+    });
+
+    socket.on('changeVideo', ({ videoId, title, username }) => {
+      ignoreNextEvent.current = true;
+      applyLocalLock();
+      setCurrentSong({
+         id: videoId,
+         title: title || 'Unknown Track',
+         channel: username || 'Shared Music',
+         thumbnail: `https://img.youtube.com/vi/${videoId}/0.jpg`
+      });
+      showToast(`${username} changed the song 🎶`);
+    });
 
     return () => {
-      socket.off('room-state', handleRoomState);
-      socket.off('sync-action', handleSyncAction);
+      socket.off('room-state');
+      socket.off('play');
+      socket.off('pause');
+      socket.off('seek');
+      socket.off('changeVideo');
       if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
     };
   }, []);
@@ -147,11 +151,7 @@ export default function ListenTogether({ onClose, identity }) {
     if (isLocked || ignoreNextEvent.current) return;
     applyLocalLock();
     const time = await playerRef.current.internalPlayer.getCurrentTime();
-    socket.emit('sync-action', { 
-      roomId, 
-      action: 'play', 
-      payload: { currentTime: time, username: identity } 
-    });
+    socket.emit('play', { roomId, currentTime: time, username: identity });
     setIsPlaying(true);
     setActivePlayerName(identity);
   };
@@ -160,11 +160,7 @@ export default function ListenTogether({ onClose, identity }) {
     if (isLocked || ignoreNextEvent.current) return;
     applyLocalLock();
     const time = await playerRef.current.internalPlayer.getCurrentTime();
-    socket.emit('sync-action', { 
-      roomId, 
-      action: 'pause', 
-      payload: { currentTime: time, username: identity } 
-    });
+    socket.emit('pause', { roomId, currentTime: time, username: identity });
     setIsPlaying(false);
     setActivePlayerName('');
   };
@@ -177,14 +173,11 @@ export default function ListenTogether({ onClose, identity }) {
         channel: video.channel,
         thumbnail: video.thumbnail
     });
-    socket.emit('sync-action', { 
+    socket.emit('changeVideo', { 
       roomId, 
-      action: 'changeVideo', 
-      payload: { 
-        videoId: video.id, 
-        title: video.title, 
-        username: identity 
-      } 
+      videoId: video.id, 
+      title: video.title, 
+      username: identity 
     });
     showToast(`You changed the song 🎶`);
   };

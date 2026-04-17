@@ -24,14 +24,14 @@ export default function Chat({ roomId, username, partner }) {
       if (typingUser === partner) setPartnerTyping(false);
     };
 
-    socket.on('chat-message', handleMessage);
+    socket.on('receiveMessage', handleMessage);
     socket.on('typing', handleTyping);
     socket.on('stop-typing', handleStopTyping);
 
     return () => {
-      socket.off('chat-message', handleMessage);
-      socket.off('typing', handleTyping);
-      socket.off('stop-typing', handleStopTyping);
+      socket.off('receiveMessage');
+      socket.off('typing');
+      socket.off('stop-typing');
     };
   }, [partner]);
 
@@ -58,7 +58,7 @@ export default function Chat({ roomId, username, partner }) {
   const handleSendMessage = (e) => {
     e.preventDefault();
     if (newMessage.trim() && roomId) {
-      socket.emit('send-message', { roomId, message: newMessage.trim(), username });
+      socket.emit('sendMessage', { roomId, message: newMessage.trim(), username });
       setNewMessage('');
       
       // Stop typing immediately on send

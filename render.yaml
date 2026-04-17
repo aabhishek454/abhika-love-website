@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: abhika-love-backend
+    env: node
+    rootDir: server
+    repo: https://github.com/aabhishek454/abhika-love-website
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: NODE_ENV
+        value: production

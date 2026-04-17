@@ -63,3 +63,26 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #ff2a5f;
 }
+
+@keyframes float {
+  0% { transform: translateY(110vh) rotate(0deg); opacity: 0; }
+  10% { opacity: 0.8; }
+  90% { opacity: 0.8; }
+  100% { transform: translateY(-20vh) rotate(360deg); opacity: 0; }
+}
+
+.floating-heart {
+  position: absolute;
+  bottom: -100px;
+  animation-name: float;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  z-index: 1;
+  pointer-events: none;
+  filter: drop-shadow(0 0 10px rgba(255, 42, 95, 0.4));
+}
+
+.glow-pink {
+  box-shadow: 0 0 40px rgba(255, 42, 95, 0.3);
+}
+

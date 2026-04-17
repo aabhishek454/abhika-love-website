@@ -1,328 +1,132 @@
-import React, { useState, useEffect, useRef } from 'react';
-import YouTube from 'react-youtube';
-import { Play, Pause, SkipForward, Users, LogOut, Link as LinkIcon } from 'lucide-react';
-import { socket } from '../../lib/socket';
+import React, { useMemo } from 'react';
+import Player from './Player';
+import Search from './Search';
 import Chat from './Chat';
+import NowPlaying from './NowPlaying';
+import { Heart } from 'lucide-react';
 
-// Regex to extract YouTube video ID
-const extractVideoId = (url) => {
-  const match = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([^&?]+)/);
-  return match ? match[1] : null;
-};
+const WatchParty = ({ user, state, emitEvent }) => {
+  const partner = user === 'Abhishek' ? 'Radhika' : 'Abhishek';
 
-export default function WatchParty({ onClose, initialUsername }) {
-  const [roomId, setRoomId] = useState('');
-  const [isJoined, setIsJoined] = useState(false);
-  const [username, setUsername] = useState(initialUsername || `User_${Math.floor(Math.random() * 1000)}`);
-  
-  const [videoId, setVideoId] = useState('dQw4w9WgXcQ');
-  const [videoInput, setVideoInput] = useState('');
-  
-  const playerRef = useRef(null);
-  const ignoreNextEvent = useRef(false);
-  const syncInterval = useRef(null);
-  const lockTimeoutRef = useRef(null);
-  const [isLocked, setIsLocked] = useState(false);
-
-  useEffect(() => {
-    // Socket event listeners
-    const handleRoomState = (state) => {
-      setVideoId(state.videoId);
-      if (playerRef.current) {
-        if (state.isPlaying) {
-            playerRef.current.internalPlayer.playVideo();
-        } else {
-            playerRef.current.internalPlayer.pauseVideo();
-        }
-        playerRef.current.internalPlayer.seekTo(state.currentTime, true);
-      }
-    };
-
-    const handleSyncAction = ({ action, payload, lockDuration }) => {
-      if (!playerRef.current) return;
-      
-      ignoreNextEvent.current = true; // Prevent echo back to server
-      setIsLocked(true); // Lock manual controls
-      
-      if (lockTimeoutRef.current) clearTimeout(lockTimeoutRef.current);
-      lockTimeoutRef.current = setTimeout(() => {
-          setIsLocked(false);
-          ignoreNextEvent.current = false;
-      }, lockDuration || 2500);
-
-      try {
-          if (action === 'play') {
-            playerRef.current.internalPlayer.playVideo();
-            if (payload && payload.currentTime !== undefined) {
-                 playerRef.current.internalPlayer.seekTo(payload.currentTime, true);
-            }
-          } else if (action === 'pause') {
-            playerRef.current.internalPlayer.pauseVideo();
-             if (payload && payload.currentTime !== undefined) {
-                 playerRef.current.internalPlayer.seekTo(payload.currentTime, true);
-             }
-          } else if (action === 'seek') {
-            playerRef.current.internalPlayer.seekTo(payload.currentTime, true);
-          } else if (action === 'changeVideo') {
-             setVideoId(payload.videoId);
-          }
-      } catch (err) {
-          console.error("Player sync error", err);
-      }
-    };
-
-    socket.on('room-state', handleRoomState);
-    socket.on('sync-action', handleSyncAction);
-
-    return () => {
-      socket.off('room-state', handleRoomState);
-      socket.off('sync-action', handleSyncAction);
-      if (syncInterval.current) clearInterval(syncInterval.current);
-    };
+  // Generate random hearts for the premium couple theme
+  const hearts = useMemo(() => {
+    return Array.from({ length: 15 }).map((_, i) => ({
+      id: i,
+      left: `${Math.random() * 100}%`,
+      animationDuration: `${10 + Math.random() * 10}s`,
+      animationDelay: `${Math.random() * 5}s`,
+      fontSize: `${1 + Math.random() * 1.5}rem`,
+      icon: Math.random() > 0.5 ? '❤️' : '💕'
+    }));
   }, []);
 
-
-  const handleJoin = (e) => {
-    e.preventDefault();
-    if (roomId.trim() && username.trim()) {
-      socket.connect();
-      socket.emit('join-room', { roomId });
-      setIsJoined(true);
-      
-      // Periodically sync time to server to help late joiners later
-      syncInterval.current = setInterval(async () => {
-          if (playerRef.current && playerRef.current.internalPlayer) {
-              try {
-                  const state = await playerRef.current.internalPlayer.getPlayerState();
-                  if (state === YouTube.PlayerState.PLAYING) {
-                      const time = await playerRef.current.internalPlayer.getCurrentTime();
-                      socket.emit('sync-time', { roomId, currentTime: time });
-                  }
-              } catch(e) {}
-          }
-      }, 5000);
-    }
-  };
-
-  const handleLeave = () => {
-    socket.disconnect();
-    setIsJoined(false);
-    if (syncInterval.current) clearInterval(syncInterval.current);
-    onClose();
-  };
-
-  // Player Event Handlers
-  const applyLocalLock = () => {
-    setIsLocked(true);
-    if (lockTimeoutRef.current) clearTimeout(lockTimeoutRef.current);
-    lockTimeoutRef.current = setTimeout(() => {
-        setIsLocked(false);
-    }, 2500);
-  };
-
-  const onReady = (event) => {
-    playerRef.current = event.target;
-  };
-
-  const onPlay = async () => {
-    if (isLocked || ignoreNextEvent.current) {
-      if (isLocked) {
-        // Force player back to pause if they tried to play while locked
-        ignoreNextEvent.current = true;
-        try { playerRef.current.internalPlayer.pauseVideo(); } catch(e) {}
-        setTimeout(() => { ignoreNextEvent.current = false; }, 500);
-      }
-      return;
-    }
-    
-    applyLocalLock();
-    try {
-        const time = await playerRef.current.internalPlayer.getCurrentTime();
-        socket.emit('sync-action', { roomId, action: 'play', payload: { currentTime: time } });
-    } catch(e) {}
-  };
-
-  const onPause = async () => {
-    if (isLocked || ignoreNextEvent.current) {
-      if (isLocked) {
-        // Force player back to play if they tried to pause while locked
-        ignoreNextEvent.current = true;
-        try { playerRef.current.internalPlayer.playVideo(); } catch(e) {}
-        setTimeout(() => { ignoreNextEvent.current = false; }, 500);
-      }
-      return;
-    }
-    
-    applyLocalLock();
-    try {
-        const time = await playerRef.current.internalPlayer.getCurrentTime();
-        socket.emit('sync-action', { roomId, action: 'pause', payload: { currentTime: time } });
-    } catch(e) {}
-  };
-  
-  const onStateChange = async (event) => {
-      // YouTube.PlayerState.BUFFERING = 3
-      if (event.data === YouTube.PlayerState.BUFFERING && !ignoreNextEvent.current) {
-         if (isLocked) return;
-         
-         applyLocalLock();
-         try {
-             const time = await playerRef.current.internalPlayer.getCurrentTime();
-             socket.emit('sync-action', { roomId, action: 'seek', payload: { currentTime: time } });
-         } catch(e) {}
-      }
-  }
-
-  const handleVideoChange = (e) => {
-    e.preventDefault();
-    const extractedId = extractVideoId(videoInput);
-    if (extractedId) {
-      setVideoId(extractedId);
-      socket.emit('sync-action', { roomId, action: 'changeVideo', payload: { videoId: extractedId } });
-      setVideoInput('');
-    } else {
-      alert('Invalid YouTube URL');
-    }
-  };
-
-  const opts = {
-    height: '100%',
-    width: '100%',
-    playerVars: {
-      autoplay: 0,
-      modestbranding: 1,
-      rel: 0,
-      disablekb: 0, // Allow keyboard controls
-    },
-  };
-
-  if (!isJoined) {
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-        <div className="bg-[#1a1a2e] border border-pink-500/30 rounded-3xl p-8 w-full max-w-md shadow-2xl relative overflow-hidden">
-             {/* Decorative blobs */}
-            <div className="absolute top-0 right-0 w-32 h-32 bg-pink-600/20 rounded-full blur-3xl" />
-            <div className="absolute bottom-0 left-0 w-32 h-32 bg-purple-600/20 rounded-full blur-3xl" />
-            
-            <button
-                onClick={onClose}
-                className="absolute top-4 right-4 text-white/50 hover:text-white transition-colors"
-                aria-label="Close"
-            >
-                <LogOut size={20} />
-            </button>
-
-            <h2 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-purple-400 mb-6 text-center">
-                Watch Party
-            </h2>
-            
-            <form onSubmit={handleJoin} className="space-y-4 relative z-10">
-                <div>
-                <label className="block text-sm text-pink-200 mb-1">Your Name</label>
-                <input
-                    type="text"
-                    required
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    className="w-full bg-black/30 border border-pink-500/30 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-pink-500 transition-colors"
-                    placeholder="Enter your name"
-                />
-                </div>
-                <div>
-                <label className="block text-sm text-pink-200 mb-1">Room ID</label>
-                <input
-                    type="text"
-                    required
-                    value={roomId}
-                    onChange={(e) => setRoomId(e.target.value)}
-                    className="w-full bg-black/30 border border-pink-500/30 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-pink-500 transition-colors"
-                    placeholder="e.g. 'movie-night', 'lofi'"
-                />
-                </div>
-                <button
-                type="submit"
-                className="w-full bg-gradient-to-r from-pink-600 to-purple-600 text-white font-bold rounded-xl py-3 mt-4 hover:shadow-[0_0_20px_rgba(219,39,119,0.5)] transition-all active:scale-95"
-                >
-                Join Room
-                </button>
-            </form>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="fixed inset-0 z-50 bg-[#0f0f1a] flex flex-col md:flex-row">
-      {/* Main Video Area */}
-      <div className="flex-1 flex flex-col h-[50vh] md:h-full relative overflow-hidden">
-         {/* Top Bar inside Video Area */}
-        <div className="absolute top-0 left-0 right-0 z-10 p-4 bg-gradient-to-b from-black/80 to-transparent flex justify-between items-center">
-           <div className="flex items-center gap-3 bg-black/40 backdrop-blur-md px-4 py-2 rounded-full border border-white/10">
-               <Users size={16} className="text-pink-400" />
-               <span className="text-white/90 text-sm font-medium">Room: <span className="text-pink-400">{roomId}</span></span>
-           </div>
-           
-           <button
-             onClick={handleLeave}
-             className="flex items-center gap-2 bg-white/10 hover:bg-red-500/20 text-white px-4 py-2 rounded-full backdrop-blur-md border border-white/10 transition-colors group"
-           >
-             <span className="text-sm font-medium">Leave</span>
-             <LogOut size={16} className="group-hover:text-red-400" />
-           </button>
-        </div>
+    <div className="flex flex-col h-screen text-slate-200 overflow-hidden bg-[#050505] relative">
+      {/* Floating Love Animations */}
+      <div className="absolute inset-0 pointer-events-none z-0 overflow-hidden">
+        {hearts.map(h => (
+          <div 
+            key={h.id} 
+            className="floating-heart" 
+            style={{ 
+              left: h.left, 
+              animationDuration: h.animationDuration,
+              animationDelay: h.animationDelay,
+              fontSize: h.fontSize
+            }}
+          >
+            {h.icon}
+          </div>
+        ))}
+      </div>
+      
+      {/* Background Dimming over animations */}
+      <div className="absolute inset-0 bg-black/60 z-0"></div>
 
-        {/* Video Player wrapper to maintain aspect ratio and fill space */}
-        <div className="flex-1 w-full bg-black flex items-center justify-center relative">
-            <div className={`absolute inset-0 w-full h-full transition-opacity duration-300 ${isLocked ? 'pointer-events-none opacity-80' : ''}`}>
-                <YouTube
-                    videoId={videoId}
-                    opts={opts}
-                    onReady={onReady}
-                    onPlay={onPlay}
-                    onPause={onPause}
-                    onStateChange={onStateChange}
-                    className="w-full h-full"
-                    iframeClassName="w-full h-full border-none"
-                    style={{ pointerEvents: isLocked ? 'none' : 'auto' }}
-                />
-            </div>
-            {isLocked && (
-              <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-pink-500/80 text-white px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider backdrop-blur-md shadow-lg flex items-center gap-2 z-20">
-                <div className="w-2 h-2 rounded-full bg-white animate-pulse"></div>
-                Syncing Player...
-              </div>
-            )}
+      {/* Header */}
+      <header className="h-16 flex-shrink-0 flex items-center justify-between px-6 bg-white/5 backdrop-blur-md border-b border-white/5 z-20">
+        <div className="flex items-center gap-3">
+          <Heart className="w-6 h-6 text-pink-500 animate-pulse fill-pink-500/20" />
+          <h1 className="text-xl font-bold tracking-tight">
+            Listening with <span className="text-pink-500">{partner}</span> 💕
+          </h1>
         </div>
+        <div className="flex items-center gap-2 text-sm text-slate-400">
+          <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+          Hey, {user}
+        </div>
+      </header>
 
-        {/* Bottom Control Bar */}
-        <div className="p-4 bg-black/60 backdrop-blur-md border-t border-white/10 sm:p-6 shrink-0">
-             <form onSubmit={handleVideoChange} className="flex gap-2 max-w-2xl mx-auto">
-                <div className="relative flex-1">
-                    <LinkIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" size={18} />
-                    <input
-                        type="text"
-                        value={videoInput}
-                        onChange={(e) => setVideoInput(e.target.value)}
-                        placeholder="Paste YouTube URL to change video for everyone..."
-                        className="w-full bg-white/5 border border-white/10 rounded-full py-2.5 pl-10 pr-4 text-sm text-white placeholder:text-white/40 focus:outline-none focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/50 transition-all"
-                    />
+      {/* Main Container */}
+      <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
+        {/* Left Column: Player & Queue */}
+        <div className="flex-1 flex flex-col min-w-0">
+          <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-8 scrollbar-hide">
+            <div className="max-w-4xl mx-auto w-full space-y-8 pb-32">
+              {/* Player Section */}
+              <Player 
+                videoId={state.currentVideoId} 
+                isPlaying={state.isPlaying} 
+                currentTime={state.currentTime}
+                localLastUpdated={state.localLastUpdated}
+                volume={state.volume}
+                emitEvent={emitEvent}
+                user={user}
+              />
+              
+              {/* Search Section */}
+              <Search emitEvent={emitEvent} />
+
+              {/* Queue Section */}
+              <div className="space-y-4">
+                <h2 className="text-lg font-semibold flex items-center gap-2 text-slate-400">
+                  <span className="w-1.5 h-1.5 bg-pink-500 rounded-full"></span>
+                  Up Next ({state.queue?.length || 0})
+                </h2>
+                <div className="grid gap-3">
+                  {state.queue?.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between p-3 bg-white/5 backdrop-blur-md rounded-xl border border-white/5 group hover:bg-white/10 transition-all">
+                      <div className="flex items-center gap-4 min-w-0">
+                        <img src={item.thumbnail} alt="" className="w-16 aspect-video object-cover rounded-md" />
+                        <span className="truncate text-sm font-medium">{item.title}</span>
+                      </div>
+                      <button 
+                        onClick={() => emitEvent('removeFromQueue', { id: item.id })}
+                        className="p-2 text-slate-500 hover:text-red-400 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  {(!state.queue || state.queue.length === 0) && (
+                    <p className="text-sm text-slate-600 italic">No songs in queue. Add some!</p>
+                  )}
                 </div>
-                <button
-                    type="submit"
-                    disabled={!videoInput.trim()}
-                    className="bg-white/10 hover:bg-pink-600 text-white px-6 py-2.5 rounded-full text-sm font-medium transition-colors disabled:opacity-50 disabled:hover:bg-white/10"
-                >
-                    Play
-                </button>
-             </form>
+              </div>
+            </div>
+          </div>
         </div>
+
+        {/* Right Column: Chat (Stacks below on mobile, sidebar on desktop) */}
+        <aside className="w-full lg:w-80 flex flex-col border-t lg:border-t-0 lg:border-l border-white/5 bg-slate-900/40 backdrop-blur-xl h-[400px] lg:h-auto">
+          <Chat 
+            messages={state.messages} 
+            emitEvent={emitEvent} 
+            user={user} 
+          />
+        </aside>
       </div>
 
-      {/* Side Chat Panel */}
-      <div className="w-full md:w-80 lg:w-96 h-[50vh] md:h-full shrink-0 border-l border-white/10 bg-[#161625] flex flex-col p-4 md:p-6 relative">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-pink-600/10 rounded-full blur-3xl pointer-events-none" />
-          <Chat roomId={roomId} username={username} />
-      </div>
+      {/* Footer / Now Playing */}
+      <footer className="h-24 flex-shrink-0 z-30">
+        <NowPlaying 
+          state={state} 
+          emitEvent={emitEvent}
+          user={user}
+        />
+      </footer>
     </div>
   );
-}
+};
+
+export default WatchParty;

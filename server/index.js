@@ -30,7 +30,8 @@ io.on('connection', (socket) => {
         videoId: 'dQw4w9WgXcQ', // Default video (Rick Astley)
         currentTime: 0,
         isPlaying: false,
-        lastSyncTime: Date.now()
+        lastSyncTime: Date.now(),
+        lockUntil: 0 // Control lock to prevent conflicts
       };
     }
 
@@ -43,25 +44,35 @@ io.on('connection', (socket) => {
   });
 
   socket.on('sync-action', ({ roomId, action, payload }) => {
-    // Update room state based on action
-    if (rooms[roomId]) {
-       if (action === 'play') {
-           rooms[roomId].isPlaying = true;
-           rooms[roomId].currentTime = payload.currentTime;
-       } else if (action === 'pause') {
-           rooms[roomId].isPlaying = false;
-           rooms[roomId].currentTime = payload.currentTime;
-       } else if (action === 'seek') {
-           rooms[roomId].currentTime = payload.currentTime;
-       } else if (action === 'changeVideo') {
-           rooms[roomId].videoId = payload.videoId;
-           rooms[roomId].currentTime = 0;
-           rooms[roomId].isPlaying = true; // Auto-play new video
-       }
+    if (!rooms[roomId]) return;
+
+    // IMPORTANT: Control Lock
+    // Ignore incoming actions if the room is currently locked
+    if (Date.now() < rooms[roomId].lockUntil) {
+      console.log(`Action ${action} blocked due to lock in room ${roomId}`);
+      return;
     }
 
-    // Broadcast the action to everyone else in the room
-    socket.to(roomId).emit('sync-action', { action, payload });
+    // Lock the room for 2500ms to prevent consecutive conflicting actions
+    rooms[roomId].lockUntil = Date.now() + 2500;
+
+    // Update room state based on action
+    if (action === 'play') {
+       rooms[roomId].isPlaying = true;
+       rooms[roomId].currentTime = payload.currentTime;
+    } else if (action === 'pause') {
+       rooms[roomId].isPlaying = false;
+       rooms[roomId].currentTime = payload.currentTime;
+    } else if (action === 'seek') {
+       rooms[roomId].currentTime = payload.currentTime;
+    } else if (action === 'changeVideo') {
+       rooms[roomId].videoId = payload.videoId;
+       rooms[roomId].currentTime = 0;
+       rooms[roomId].isPlaying = true; // Auto-play new video
+    }
+
+    // Broadcast the action and the lock to everyone else in the room
+    socket.to(roomId).emit('sync-action', { action, payload, lockDuration: 2500 });
   });
 
   socket.on('sync-time', ({ roomId, currentTime }) => {

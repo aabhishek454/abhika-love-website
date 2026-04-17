@@ -21,6 +21,8 @@ export default function WatchParty({ onClose, initialUsername }) {
   const playerRef = useRef(null);
   const ignoreNextEvent = useRef(false);
   const syncInterval = useRef(null);
+  const lockTimeoutRef = useRef(null);
+  const [isLocked, setIsLocked] = useState(false);
 
   useEffect(() => {
     // Socket event listeners
@@ -36,15 +38,21 @@ export default function WatchParty({ onClose, initialUsername }) {
       }
     };
 
-    const handleSyncAction = ({ action, payload }) => {
+    const handleSyncAction = ({ action, payload, lockDuration }) => {
       if (!playerRef.current) return;
       
       ignoreNextEvent.current = true; // Prevent echo back to server
+      setIsLocked(true); // Lock manual controls
+      
+      if (lockTimeoutRef.current) clearTimeout(lockTimeoutRef.current);
+      lockTimeoutRef.current = setTimeout(() => {
+          setIsLocked(false);
+          ignoreNextEvent.current = false;
+      }, lockDuration || 2500);
 
       try {
           if (action === 'play') {
             playerRef.current.internalPlayer.playVideo();
-            // Sync time on play as well to be safe
             if (payload && payload.currentTime !== undefined) {
                  playerRef.current.internalPlayer.seekTo(payload.currentTime, true);
             }
@@ -61,11 +69,6 @@ export default function WatchParty({ onClose, initialUsername }) {
       } catch (err) {
           console.error("Player sync error", err);
       }
-      
-      // Delay resetting ignore flag to allow player to process action
-      setTimeout(() => {
-          ignoreNextEvent.current = false;
-      }, 500);
     };
 
     socket.on('room-state', handleRoomState);
@@ -109,12 +112,30 @@ export default function WatchParty({ onClose, initialUsername }) {
   };
 
   // Player Event Handlers
+  const applyLocalLock = () => {
+    setIsLocked(true);
+    if (lockTimeoutRef.current) clearTimeout(lockTimeoutRef.current);
+    lockTimeoutRef.current = setTimeout(() => {
+        setIsLocked(false);
+    }, 2500);
+  };
+
   const onReady = (event) => {
     playerRef.current = event.target;
   };
 
   const onPlay = async () => {
-    if (ignoreNextEvent.current) return;
+    if (isLocked || ignoreNextEvent.current) {
+      if (isLocked) {
+        // Force player back to pause if they tried to play while locked
+        ignoreNextEvent.current = true;
+        try { playerRef.current.internalPlayer.pauseVideo(); } catch(e) {}
+        setTimeout(() => { ignoreNextEvent.current = false; }, 500);
+      }
+      return;
+    }
+    
+    applyLocalLock();
     try {
         const time = await playerRef.current.internalPlayer.getCurrentTime();
         socket.emit('sync-action', { roomId, action: 'play', payload: { currentTime: time } });
@@ -122,7 +143,17 @@ export default function WatchParty({ onClose, initialUsername }) {
   };
 
   const onPause = async () => {
-    if (ignoreNextEvent.current) return;
+    if (isLocked || ignoreNextEvent.current) {
+      if (isLocked) {
+        // Force player back to play if they tried to pause while locked
+        ignoreNextEvent.current = true;
+        try { playerRef.current.internalPlayer.playVideo(); } catch(e) {}
+        setTimeout(() => { ignoreNextEvent.current = false; }, 500);
+      }
+      return;
+    }
+    
+    applyLocalLock();
     try {
         const time = await playerRef.current.internalPlayer.getCurrentTime();
         socket.emit('sync-action', { roomId, action: 'pause', payload: { currentTime: time } });
@@ -132,10 +163,12 @@ export default function WatchParty({ onClose, initialUsername }) {
   const onStateChange = async (event) => {
       // YouTube.PlayerState.BUFFERING = 3
       if (event.data === YouTube.PlayerState.BUFFERING && !ignoreNextEvent.current) {
+         if (isLocked) return;
+         
+         applyLocalLock();
          try {
              const time = await playerRef.current.internalPlayer.getCurrentTime();
-             // Let others know we are seeking/buffering
-             socket.emit('sync-action', { roomId, action: 'pause', payload: { currentTime: time } });
+             socket.emit('sync-action', { roomId, action: 'seek', payload: { currentTime: time } });
          } catch(e) {}
       }
   }
@@ -240,7 +273,7 @@ export default function WatchParty({ onClose, initialUsername }) {
 
         {/* Video Player wrapper to maintain aspect ratio and fill space */}
         <div className="flex-1 w-full bg-black flex items-center justify-center relative">
-            <div className="absolute inset-0 w-full h-full">
+            <div className={`absolute inset-0 w-full h-full transition-opacity duration-300 ${isLocked ? 'pointer-events-none opacity-80' : ''}`}>
                 <YouTube
                     videoId={videoId}
                     opts={opts}
@@ -250,8 +283,15 @@ export default function WatchParty({ onClose, initialUsername }) {
                     onStateChange={onStateChange}
                     className="w-full h-full"
                     iframeClassName="w-full h-full border-none"
+                    style={{ pointerEvents: isLocked ? 'none' : 'auto' }}
                 />
             </div>
+            {isLocked && (
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-pink-500/80 text-white px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider backdrop-blur-md shadow-lg flex items-center gap-2 z-20">
+                <div className="w-2 h-2 rounded-full bg-white animate-pulse"></div>
+                Syncing Player...
+              </div>
+            )}
         </div>
 
         {/* Bottom Control Bar */}

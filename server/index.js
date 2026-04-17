@@ -2,9 +2,44 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import youTubeSearch from 'youtube-search-api';
 
 const app = express();
 app.use(cors());
+app.use(express.json());
+
+// In-memory cache for search results
+const searchCache = new Map();
+const CACHE_DURATION = 1000 * 60 * 10; // 10 minutes
+
+app.get('/api/youtube/search', async (req, res) => {
+  const query = req.query.q;
+  if (!query) return res.status(400).json({ error: 'Query is required' });
+
+  if (searchCache.has(query)) {
+    const { timestamp, data } = searchCache.get(query);
+    if (Date.now() - timestamp < CACHE_DURATION) {
+      return res.json(data);
+    }
+  }
+
+  try {
+    const results = await youTubeSearch.GetListByKeyword(query, false, 15);
+    const formattedResults = results.items.map(item => ({
+      id: item.id,
+      title: item.title,
+      thumbnail: item.thumbnail?.thumbnails[0]?.url || '',
+      channel: item.channelTitle || 'Unknown Artist',
+      duration: item.length?.simpleText || ''
+    }));
+
+    searchCache.set(query, { timestamp: Date.now(), data: formattedResults });
+    res.json(formattedResults);
+  } catch (err) {
+    console.error('Search error:', err);
+    res.status(500).json({ error: 'Failed to fetch results' });
+  }
+});
 
 const server = createServer(app);
 const io = new Server(server, {
@@ -16,7 +51,15 @@ const io = new Server(server, {
 
 // Store room states
 // { roomId: { videoId: string, currentTime: number, isPlaying: boolean, lastSyncTime: number } }
-const rooms = {};
+const rooms = {
+  'abhika-couple': {
+    videoId: 'dQw4w9WgXcQ',
+    currentTime: 0,
+    isPlaying: false,
+    lastSyncTime: Date.now(),
+    lockUntil: 0
+  }
+};
 
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
@@ -90,6 +133,20 @@ io.on('connection', (socket) => {
       timestamp: new Date().toISOString()
     };
     io.to(roomId).emit('chat-message', chatMessage);
+  });
+
+  socket.on('start-listening', ({ username }) => {
+    console.log(`${username} started listening`);
+    // Broadcast to everyone else (the partner)
+    socket.broadcast.emit('partner-listening', { username });
+  });
+
+  socket.on('typing', ({ roomId, username }) => {
+    socket.to(roomId).emit('typing', { username });
+  });
+
+  socket.on('stop-typing', ({ roomId, username }) => {
+    socket.to(roomId).emit('stop-typing', { username });
   });
 
   socket.on('disconnect', () => {
